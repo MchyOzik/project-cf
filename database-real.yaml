@@ -1,0 +1,75 @@
+Parameters:
+    privsubnet1: 
+      Type: AWS::EC2::Subnet::Id
+    privsubnet2: 
+      Type: AWS::EC2::Subnet::Id
+    dbsg:
+      Type: AWS::EC2::SecurityGroup::Id
+
+Resources: 
+  sbrds: 
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: sb-db
+      DBSubnetGroupDescription: db subnet for rds
+      SubnetIds: 
+        - !Ref privsubnet1
+        - !Ref privsubnet2
+      Tags: 
+        - Key: Name
+          Value: sb-db
+
+  parametergroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      DBParameterGroupName: custompostgres
+      Description: Postgres Parameter Group
+      Family: postgres17
+      Parameters:
+        rds.force_ssl: 0
+        password_encryption: md5
+
+  RDSDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: lks_rds
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      DBInstanceIdentifier: lks-rds
+      DBSubnetGroupName: !Ref sbrds
+      DBParameterGroupName: !Ref parametergroup
+      Engine: postgres
+      EngineVersion: "17.7"
+      StorageType: gp2
+      MasterUsername: postgres
+      MasterUserPassword: LKSNCC2024
+      VPCSecurityGroups: 
+        - !Ref dbsg
+      PubliclyAccessible : false
+      MultiAZ: false
+
+  topicsns:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: lks-vote-topic
+
+  subscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: mzyozik@gmail.com
+      Protocol: email
+      TopicArn: !Ref topicsns
+
+
+         
+
+  
+
+
+  
+  
+
+
+  
+
+   

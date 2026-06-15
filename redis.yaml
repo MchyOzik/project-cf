@@ -1,0 +1,38 @@
+Parameters:
+  pubsubnet1:
+    Type: AWS::EC2::Subnet::Id
+
+  pubsubnet2:
+    Type: AWS::EC2::Subnet::Id
+
+  redissg:
+    Type: AWS::EC2::SecurityGroup::Id
+
+Resources:
+
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: redis-sb
+      Description: Redis Subnet Group
+      SubnetIds:
+        - !Ref pubsubnet1
+        - !Ref pubsubnet2
+
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: lks-redis
+      ReplicationGroupDescription: Redis for ECS
+      Engine: redis
+      CacheNodeType: cache.m7g.large
+      NumNodeGroups: 1
+      ReplicasPerNodeGroup: 2
+      AutomaticFailoverEnabled: true
+      MultiAZEnabled: false
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      SecurityGroupIds:
+        - !Ref redissg
+      AutoMinorVersionUpgrade: false
+      SnapshotRetentionLimit: 0
+      TransitEncryptionEnabled: false

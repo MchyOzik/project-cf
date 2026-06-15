@@ -1,0 +1,305 @@
+Parameters:
+  vpc:
+    Type: AWS::EC2::VPC::Id
+
+  subnetpublica:
+    Type: AWS::EC2::Subnet::Id
+
+  subnetpublicb:
+    Type: AWS::EC2::Subnet::Id
+
+  subnetprivatea:
+    Type: AWS::EC2::Subnet::Id
+
+  subnetprivateb:
+    Type: AWS::EC2::Subnet::Id
+
+  albsg:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  ecssg:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  ecsTaskExecutionRole:
+    Type: String
+    Default: arn:aws:iam::214365501455:role/LabRole
+
+Resources:
+
+  VotingECR:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: lks-voting-image
+      ImageTagMutability: MUTABLE
+
+  VoteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/vote
+
+  ResultLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/result
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/worker
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: lks-voting-cluster
+
+  VoteTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: lks-td-vote
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+
+      RequiresCompatibilities:
+        - FARGATE
+
+      TaskRoleArn: !Ref ecsTaskExecutionRole
+      ExecutionRoleArn: !Ref ecsTaskExecutionRole
+
+      EnableFaultInjection: false
+
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+
+      ContainerDefinitions:
+        - Name: lks-vote-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/lks-voting-image:latest"
+          Essential: true
+
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+
+          Secrets:
+            - Name: REDIS_HOST
+              ValueFrom: /lks/redis-host
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/vote
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  ResultTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: lks-td-result
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+
+      RequiresCompatibilities:
+        - FARGATE
+
+      TaskRoleArn: !Ref ecsTaskExecutionRole
+      ExecutionRoleArn: !Ref ecsTaskExecutionRole
+
+      EnableFaultInjection: false
+
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+
+      ContainerDefinitions:
+        - Name: lks-result-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/lks-voting-image:latest"
+
+          Essential: true
+
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+
+          Secrets:
+            - Name: POSTGRES_CONNECTION_STRING
+              ValueFrom: /lks/result-db-url
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/result
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+
+  WorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: lks-td-worker
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+
+      RequiresCompatibilities:
+        - FARGATE
+
+      TaskRoleArn: !Ref ecsTaskExecutionRole
+      ExecutionRoleArn: !Ref ecsTaskExecutionRole
+
+      EnableFaultInjection: false
+
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+
+      ContainerDefinitions:
+        - Name: lks-worker-container
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/lks-voting-image:latest"
+
+          Essential: true
+
+          Secrets:
+            - Name: POSTGRES_CONNECTION_STRING
+              ValueFrom: /lks/worker-db-url
+
+            - Name: REDIS_HOST
+              ValueFrom: /lks/redis-host
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/worker
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+
+  VoteTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: lks-tg-vote
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /
+      VpcId: !Ref vpc
+
+  ResultTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: lks-tg-result
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /
+      VpcId: !Ref vpc
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: lks-lb-prod
+      Scheme: internet-facing
+      Type: application
+
+      SecurityGroups:
+        - !Ref albsg
+      Subnets:
+        - !Ref subnetpublica
+        - !Ref subnetpublicb
+
+  VoteListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref VoteTG
+
+  ResultListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 81
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ResultTG
+
+
+  VoteService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - VoteListener
+    Properties:
+      ServiceName: lks-vote-service
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: 1
+      TaskDefinition: !Ref VoteTaskDefinition
+      LoadBalancers:
+        - ContainerName: lks-vote-container
+          ContainerPort: 80
+          TargetGroupArn: !Ref VoteTG
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ecssg
+          Subnets:
+            - !Ref subnetprivatea
+            - !Ref subnetprivateb
+
+  ResultService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ResultListener
+    Properties:
+      ServiceName: lks-result-service
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: 1
+      TaskDefinition: !Ref ResultTaskDefinition
+      LoadBalancers:
+        - ContainerName: lks-result-container
+          ContainerPort: 80
+          TargetGroupArn: !Ref ResultTG
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref ecssg
+          Subnets:
+            - !Ref subnetprivatea
+            - !Ref subnetprivateb
+
+  WorkerService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: lks-worker-service
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DesiredCount: 1
+      TaskDefinition: !Ref WorkerTaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+
+          SecurityGroups:
+            - !Ref ecssg
+
+          Subnets:
+            - !Ref subnetprivatea
+            - !Ref subnetprivateb
+
+Outputs:
+
+  ClusterName:
+    Value: !Ref ECSCluster
+
+  LoadBalancerDNS:
+    Value: !GetAtt LoadBalancer.DNSName
+
+  ECRRepositoryURI:
+    Value: !GetAtt VotingECR.RepositoryUri

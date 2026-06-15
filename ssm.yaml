@@ -1,0 +1,42 @@
+Parameters:
+  RDSEndpoint:
+    Type: String
+    Default: lks-rds.cos78cvmhp2b.us-east-1.rds.amazonaws.com
+
+  DBUsername:
+    Type: String
+    Default: postgres
+
+  DBPassword:
+    Type: String
+    Default: LKSNCC2024
+
+  RedisHost:
+    Type: String
+    Default: lks-redis.pm0sit.ng.0001.use1.cache.amazonaws.com
+
+Resources:
+
+  RedisHostParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lks/redis-host
+      Type: String
+      Value: !Ref RedisHost
+      Description: Redis hostname
+
+  ResultDBParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lks/result-db-url
+      Type: String
+      Value: !Sub "postgres://${DBUsername}:${DBPassword}@${RDSEndpoint}/lks_rds"
+      Description: PostgreSQL connection string for result service
+
+  WorkerDBParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /lks/worker-db-url
+      Type: String
+      Value: !Sub "Server=${RDSEndpoint};Port=5432;Username=${DBUsername};Password=${DBPassword};"
+      Description: PostgreSQL connection string for worker service

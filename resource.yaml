@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: 2010-09-09
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: MyFargateCluster
+
+  ECSTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      ContainerDefinitions:
+        - Name: test
+          Image: 'public.ecr.aws/docker/library/httpd:2.4'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          MountPoints:
+            - SourceVolume: efs-volume
+              ContainerPath: /usr/share/nginx/html
+      Family: test
+      Cpu: 2 vCPU
+      Memory: 4 GB
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Tags:
+        - Key: environment
+          Value: webserver
+      Volumes:
+        - Name: efs-volume
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue filesystem
+            RootDirectory: /
+            TransitEncryption: ENABLED
+            authorizationConfig:
+              AccessPointId: !ImportValue accesspoint
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster:
+        Ref: ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      LaunchType: FARGATE
+      ServiceName: test
+      SchedulingStrategy: REPLICA
+      DesiredCount: 2
+      LoadBalancers:
+        - ContainerName: test
+          ContainerPort: 80
+          TargetGroupArn: !Ref tg
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !ImportValue sg
+          Subnets:
+            - !ImportValue subnetprivatea
+            - !ImportValue subnetprivateb
+    DependsOn:
+      - Listener
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Name: alb-test
+      SecurityGroups:
+        - !ImportValue sg
+      Subnets:
+        - !ImportValue subnetpublica
+        - !ImportValue subnetpublicb
+  tg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /
+      Name: tg-green
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      VpcId: !ImportValue vpc
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref tg
+      LoadBalancerArn:
+        Ref: LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+Outputs:
+  listenerarn:
+    Value: !Ref Listener
+    Export:
+      Name: listener
+  clustername:
+    Value: !Ref ECSCluster
+    Export:
+      Name: cluster
+  servicename:
+    Value: !GetAtt ECSService.Name
+    Export:
+      Name: service
